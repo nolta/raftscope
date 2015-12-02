@@ -84,6 +84,28 @@ playback = function() {
   };
 }();
 
+var qs = (function(a) {
+    if (a == "") return {};
+    var b = {};
+    for (var i = 0; i < a.length; ++i)
+    {
+        var p=a[i].split('=', 2);
+        if (p.length == 1)
+            b[p[0]] = "";
+        else
+            b[p[0]] = decodeURIComponent(p[1].replace(/\+/g, " "));
+    }
+    return b;
+})(window.location.search.substr(1).split('&'));
+
+var setLog = function(server, terms) {
+    var log = [];
+    terms.forEach(function(term) {
+        log.push({term:term, value:'v'});
+    });
+    server.log = log;
+};
+
 (function() {
   for (var i = 1; i <= NUM_SERVERS; i += 1) {
       var peers = [];
@@ -91,7 +113,27 @@ playback = function() {
         if (i != j)
           peers.push(j);
       }
-      state.current.servers.push(raft.server(i, peers));
+      var s = raft.server(i, peers);
+      if (qs.hasOwnProperty('term')) { s.term = parseInt(qs.term); }
+      state.current.servers.push(s);
+  }
+  if (qs.hasOwnProperty('logs')) {
+      var logs = JSON.parse(qs['logs']);
+      for (var i = 0; i < Math.min(NUM_SERVERS,logs.length); i += 1) {
+          setLog(state.current.servers[i], logs[i]);
+      }
+  }
+  if (qs.hasOwnProperty('leader')) {
+      var leader = parseInt(qs.leader);
+      for (var i = 0; i < NUM_SERVERS; i += 1) {
+          state.current.servers[i].votedFor = leader;
+      }
+      s = state.current.servers[leader-1];
+      s.state = 'leader';
+      s.voteGranted = util.makeMap(s.peers, true);
+      s.nextIndex = util.makeMap(s.peers, s.log.length + 1);
+      s.rpcDue = util.makeMap(s.peers, util.Inf);
+      s.electionAlarm = util.Inf;
   }
 })();
 
@@ -776,6 +818,7 @@ state.updater = function(state) {
 };
 
 state.init();
+playback.pause();
 render.update();
 });
 
